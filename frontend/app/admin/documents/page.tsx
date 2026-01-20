@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Filter, Plus, FileText, Download, Trash2, RefreshCw, Eye
+    Search, Filter, Plus, FileText, Download, Trash2, RefreshCw, Eye, X, Upload
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,6 +12,15 @@ export default function DocumentsPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [documents, setDocuments] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+
+    // Upload modal state
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [uploadTitle, setUploadTitle] = useState('');
+    const [uploadType, setUploadType] = useState('Policy');
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (token) {
@@ -57,12 +66,6 @@ export default function DocumentsPage() {
     };
 
     const handleView = (doc: any) => {
-        const url = `http://localhost:8000/api/admin/documents/${doc.id}/content?token=${token}`;
-        // Since we are using Bearer auth header normally, for a browser navigation window.open
-        // we might strictly need to handle auth. But for simplicity, we can try opening it.
-        // If auth fails (since we can't pass header easily in window.open), we might need a token param support
-        // or fetch blob -> createObjectURL.
-        // Let's use the blob approach for better security compliance.
         fetch(`http://localhost:8000/api/admin/documents/${doc.id}/content`, {
              headers: { 'Authorization': `Bearer ${token}` }
         })
@@ -72,6 +75,56 @@ export default function DocumentsPage() {
             window.open(fileURL, '_blank');
         })
         .catch(err => alert("Failed to open document: " + err));
+    };
+
+    const handleUpload = async () => {
+        if (!uploadFile || !uploadTitle.trim()) {
+            setUploadError("Please select a file and enter a title.");
+            return;
+        }
+
+        setIsUploading(true);
+        setUploadError(null);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', uploadFile);
+            formData.append('title', uploadTitle);
+            formData.append('document_type', uploadType);
+
+            const res = await fetch('http://localhost:8000/api/documents/upload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.detail || 'Upload failed');
+            }
+
+            // Success - close modal and refresh list
+            setShowUploadModal(false);
+            setUploadFile(null);
+            setUploadTitle('');
+            setUploadType('Policy');
+            fetchDocuments();
+        } catch (e: any) {
+            setUploadError(e.message || 'Upload failed');
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setUploadFile(file);
+            // Auto-fill title from filename if empty
+            if (!uploadTitle) {
+                setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
+            }
+        }
     };
 
     return (
@@ -93,7 +146,9 @@ export default function DocumentsPage() {
                         <Filter size={18} />
                         Filter
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-[var(--primary-blue)] text-white rounded-lg hover:bg-[var(--primary-blue-dark)] transition-colors shadow-sm">
+                    <button
+                        onClick={() => setShowUploadModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-[var(--primary-blue)] text-white rounded-lg hover:bg-[var(--primary-blue-dark)] transition-colors shadow-sm">
                         <Plus size={18} />
                         Upload Document
                     </button>
@@ -168,7 +223,7 @@ export default function DocumentsPage() {
                 </table>
             </div>
             
-            {/* Pagination (Mock) */}
+            {/* Pagination */}
             <div className="flex items-center justify-between text-sm text-[var(--gray-500)] px-2">
                 <p>Showing {filteredDocs.length} documents</p>
                 <div className="flex gap-2">
@@ -176,6 +231,125 @@ export default function DocumentsPage() {
                     <button className="px-3 py-1 border border-[var(--gray-200)] rounded bg-white hover:bg-[var(--gray-50)]">Next</button>
                 </div>
             </div>
+
+            {/* Upload Modal */}
+            {showUploadModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+                        <div className="flex items-center justify-between p-4 border-b border-[var(--gray-200)]">
+                            <h2 className="text-lg font-semibold text-[var(--gray-900)]">Upload Document</h2>
+                            <button
+                                onClick={() => setShowUploadModal(false)}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-4 space-y-4">
+                            {/* File Drop Zone */}
+                            <div
+                                onClick={() => fileInputRef.current?.click()}
+                                className={cn(
+                                    "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
+                                    uploadFile
+                                        ? "border-green-300 bg-green-50"
+                                        : "border-[var(--gray-300)] hover:border-[var(--primary-blue)] hover:bg-blue-50"
+                                )}
+                            >
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".pdf,.docx,.txt"
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                />
+                                {uploadFile ? (
+                                    <div className="flex items-center justify-center gap-2 text-green-700">
+                                        <FileText size={24} />
+                                        <span className="font-medium">{uploadFile.name}</span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <Upload className="mx-auto text-[var(--gray-400)] mb-2" size={32} />
+                                        <p className="text-[var(--gray-600)]">Click to upload or drag and drop</p>
+                                        <p className="text-xs text-[var(--gray-400)] mt-1">PDF, DOCX, or TXT (max 10MB)</p>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Title Input */}
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--gray-700)] mb-1">
+                                    Document Title
+                                </label>
+                                <input
+                                    type="text"
+                                    value={uploadTitle}
+                                    onChange={(e) => setUploadTitle(e.target.value)}
+                                    placeholder="e.g. Employment Act 2007"
+                                    className="w-full px-3 py-2 border border-[var(--gray-300)] rounded-lg focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent outline-none"
+                                />
+                            </div>
+
+                            {/* Type Select */}
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--gray-700)] mb-1">
+                                    Document Type
+                                </label>
+                                <select
+                                    value={uploadType}
+                                    onChange={(e) => setUploadType(e.target.value)}
+                                    className="w-full px-3 py-2 border border-[var(--gray-300)] rounded-lg focus:ring-2 focus:ring-[var(--primary-blue)] focus:border-transparent outline-none bg-white"
+                                >
+                                    <option value="Policy">Policy Document</option>
+                                    <option value="Law">Law / Statute</option>
+                                    <option value="Contract">Contract Template</option>
+                                    <option value="Guide">Guide / Manual</option>
+                                    <option value="News">News Article</option>
+                                </select>
+                            </div>
+
+                            {/* Error Message */}
+                            {uploadError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                                    {uploadError}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex gap-3 p-4 border-t border-[var(--gray-200)]">
+                            <button
+                                onClick={() => setShowUploadModal(false)}
+                                className="flex-1 px-4 py-2 border border-[var(--gray-300)] text-[var(--gray-700)] rounded-lg hover:bg-[var(--gray-50)] transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleUpload}
+                                disabled={isUploading || !uploadFile}
+                                className={cn(
+                                    "flex-1 px-4 py-2 bg-[var(--primary-blue)] text-white rounded-lg transition-colors flex items-center justify-center gap-2",
+                                    isUploading || !uploadFile
+                                        ? "opacity-50 cursor-not-allowed"
+                                        : "hover:bg-[var(--primary-blue-dark)]"
+                                )}
+                            >
+                                {isUploading ? (
+                                    <>
+                                        <RefreshCw size={18} className="animate-spin" />
+                                        Uploading...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Upload size={18} />
+                                        Upload & Index
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

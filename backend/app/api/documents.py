@@ -6,7 +6,7 @@ from app.models.schemas import DocumentMetadata
 import uuid
 import json
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter()
 
 @router.post("/upload")
 async def upload_document(
